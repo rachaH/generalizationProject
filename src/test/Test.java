@@ -81,99 +81,68 @@ public class Test {
 
     }
 
-//    public String generalizeQuery(String query, int privacy, int utility) {
-//
-//        TWhereClause where = SqlQueryParser.getWhereClause(query);
-//        TGroupBy groupBy = SqlQueryParser.getGroupBy(query);
-//
-//        String pre_query = buildPreQuery(query);
-//        int hash = Math.abs(pre_query.hashCode());
-//        String generalizedValues = "";
-//        String generalizedQuery = "";
-//        try {
-//            Statement st = loadDriver().createStatement();
-//
-//            if (!checkTableExists("TBL_" + hash)) {
-//                cacheResult(st.executeQuery(pre_query), hash);
-//            }
-//
-//            String[] t = condition.split("[<=>]|Between");
-//            String attribute = t[0].toString();
-//            String valueRequested = t[1];//'value'
-//
-//            boolean satisfait = false;
-//            int offset = 0;
-//            int nbOfTuples = 0;
-//            if (!isInteger(valueRequested)) {
-//                String commonString = null;
-//
-//                while (!satisfait) {
-//                    ArrayList<String> values = new ArrayList<>();
-//                    values.add(valueRequested.substring(1, valueRequested.length() - 1));
-//
-//                    ResultSet rs = st.executeQuery("select " + attribute + " from tbl_" + hash + " ORDER BY rowCount limit " + privacy + " Offset " + offset);
-//
-//                    while (rs.next()) {
-//                        if (!rs.getString(1).equals(values.get(0))) {
-//                            values.add(rs.getString(1));
-//                        }
-//                    }
-//                    commonString = this.identifyCommonSubStrOfNStr(values);
-//                    if (commonString != null) {
-//                        ResultSet rsReturnedTuples = st.executeQuery("select sum(rowCount) from TBL_" + hash + " where " + attribute + " LIKE '%" + commonString + "%'");
-//                        while (rsReturnedTuples.next()) {
-//                            nbOfTuples = rsReturnedTuples.getInt(1);
-//                        }
-//
-//                        if (nbOfTuples <= utility) {
-//                            satisfait = true;
-//                            generalizedValues += attribute + " LIKE '%" + commonString + "%' ";
-//                            break;
-//                        }
-//                    }
-//                    offset += privacy;
-//                }
-//
-//            } else if (condition.contains("<")) {
-//                int alpha = 5;
-//                while (!satisfait) {
-//                    nbOfTuples = 0;
-//                    int value = Integer.parseInt(valueRequested) + alpha;
-//                    ResultSet rs = st.executeQuery("select rowcount from TBL_" + hash + " where " + attribute + " < " + value);
-//                    while (rs.next()) {
-//                        nbOfTuples += rs.getInt(1);
-//                    }
-//                    rs.last();
-//                    int diverseRows = rs.getRow();
-//
-//                    if (nbOfTuples <= utility && diverseRows >= privacy) {
-//                        satisfait = true;
-//                        generalizedValues += attribute + " < " + value;
-//                        break;
-//                    } else {
-//                        alpha += alpha;
-//                    }
-//                }
-//            } else if (condition.contains(">")) {
-//
-//            }
-//
-//            if (groupBy != null) {
-//                cacheResult(st.executeQuery(generalizedValues), hash);
-//            }
-//
-//            System.out.println(" where " + generalizedValues);
-//
-//        } catch (SQLException ex) {
-//            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-//        } catch (InstantiationException ex) {
-//            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-//        } catch (IllegalAccessException ex) {
-//            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-//        }
-//
-//        return "";
-//    }
+    public String generalizeQuery(String query, int utility, int privacy) {
+
+        try {
+            TWhereClause where = SqlQueryParser.getWhereClause(query);
+            TGroupBy groupBy = SqlQueryParser.getGroupBy(query);
+
+            String whereConditions = where.getCondition().toString();
+            String pre_query = buildPreQuery(query);
+            int hash = Math.abs(pre_query.hashCode());
+
+            Statement st = loadDriver().createStatement();
+
+            if (!checkTableExists("TBL_" + hash)) {
+                cacheResult(st.executeQuery(pre_query), hash);
+            }
+
+            Stack<String> stack = new Stack<String>();
+            StringBuffer postfix = new StringBuffer(whereConditions.length());
+            String c;
+            String[] infixList = whereConditions.split(" ");
+            boolean continueToNext = true;
+            for (int i = 0; i < infixList.length; i++) {
+                c = infixList[i];
+                if (i == infixList.length - 1) {
+                    stack.push(c);
+                    while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), continueToNext, hash, utility, privacy)) {
+                        String pop = stack.pop();
+                        if (!c.equals("(") || !c.equals(")")) {
+                            postfix.append(pop);
+                        } else {
+                        }
+                    }
+                    stack.push(c);
+                }
+                if (!isOperator(c)) {
+                    stack.push(c);
+                } else {
+                    while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), continueToNext, hash, utility, privacy)) {
+                        String pop = stack.pop();
+                        if (!c.equals("(") || !c.equals(")")) {
+                            postfix.append(pop);
+                        } else {
+                        }
+                    }
+                    stack.push(c);
+                }
+            }
+            while (!stack.isEmpty()) {
+                postfix.append(stack.pop());
+            }
+            System.out.println(SqlQueryParser.setWhereClause(query, generalizedQuery));
+
+        } catch (SQLException ex) {
+            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (InstantiationException ex) {
+            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
+        } catch (IllegalAccessException ex) {
+            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
+        }
+        return "";
+    }
+
     private String generalizeValueAndCheckPrivacy(String condition, String nextOperator, int hash, int utility, int privacy) {
 
         String generalizedValues = "";
@@ -298,68 +267,6 @@ public class Test {
                 continueToNext = false;
                 return false;
         }
-    }
-
-    public String generalizeQuery(String query, int utility, int privacy) {
-
-        try {
-            TWhereClause where = SqlQueryParser.getWhereClause(query);
-            TGroupBy groupBy = SqlQueryParser.getGroupBy(query);
-
-            String whereConditions = where.getCondition().toString();
-            String pre_query = buildPreQuery(query);
-            int hash = Math.abs(pre_query.hashCode());
-
-            Statement st = loadDriver().createStatement();
-
-            if (!checkTableExists("TBL_" + hash)) {
-                cacheResult(st.executeQuery(pre_query), hash);
-            }
-
-            Stack<String> stack = new Stack<String>();
-            StringBuffer postfix = new StringBuffer(whereConditions.length());
-            String c;
-            String[] infixList = whereConditions.split(" ");
-            boolean continueToNext = true;
-            for (int i = 0; i < infixList.length; i++) {
-                c = infixList[i];
-                if (i == infixList.length - 1) {
-                    stack.push(c);
-                    while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), continueToNext, hash, utility, privacy)) {
-                        String pop = stack.pop();
-                        if (!c.equals("(") || !c.equals(")")) {
-                            postfix.append(pop);
-                        } else {
-                        }
-                    }
-                    stack.push(c);
-                }
-                if (!isOperator(c)) {
-                    stack.push(c);
-                } else {
-                    while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), continueToNext, hash, utility, privacy)) {
-                        String pop = stack.pop();
-                        if (!c.equals("(") || !c.equals(")")) {
-                            postfix.append(pop);
-                        } else {
-                        }
-                    }
-                    stack.push(c);
-                }
-            }
-            while (!stack.isEmpty()) {
-                postfix.append(stack.pop());
-            }
-            System.out.println(SqlQueryParser.setWhereClause(query, generalizedQuery));
-
-        } catch (SQLException ex) {
-            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (InstantiationException ex) {
-            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (IllegalAccessException ex) {
-            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-        }
-        return "";
     }
 
     private static boolean isOperator(String c) {
@@ -592,7 +499,7 @@ public class Test {
 
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("select * from persons where name='Bechara' or age<20 and id<2",500, 2);
+        x.generalizeQuery("select * from persons where name='Bechara' or age<20 and id<2", 500, 2);
     }
 
 }

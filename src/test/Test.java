@@ -44,6 +44,8 @@ import static java.util.Objects.hash;
 import java.util.Stack;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import javax.jws.WebParam;
 import org.gibello.zql.ZStatement;
 import sqlwrapper.MySQLWrapper;
@@ -64,6 +66,7 @@ public class Test {
     String dbName = "test";
     private String generalizedQuery = "";
     private Connection conn = null;
+    private String joinWhereConditions = "";
 
     public Connection loadDriver() throws SQLException, InstantiationException, IllegalAccessException {
 
@@ -89,6 +92,23 @@ public class Test {
 
             String whereConditions = where.getCondition().toString();
             String pre_query = buildPreQuery(query);
+            
+            //Remove join conditions from the where clause to generalize the values without join conditions
+            if (!joinWhereConditions.equals("")) {
+                Pattern p = Pattern.compile("(and |or )+" + joinWhereConditions + "( )?");
+                Matcher m = p.matcher(whereConditions);
+
+                if (m.find()) {
+                    whereConditions = whereConditions.replace(m.group(), "");
+                } else {
+                    Pattern p2 = Pattern.compile(joinWhereConditions + "( and | or )+");
+                    Matcher m2 = p2.matcher(whereConditions);
+                    if (m2.find()) {
+                        whereConditions = whereConditions.replace(m2.group(), "");
+                    }
+                }
+                System.out.println(whereConditions);
+            }
             int hash = Math.abs(pre_query.hashCode());
 
             Statement st = loadDriver().createStatement();
@@ -305,12 +325,12 @@ public class Test {
         if (tables.size() > 1) {
             TExpressionList el = new TExpressionList();
             getJoinWhereClauses(whereClause.getCondition(), el);
-            String joinWhereConditions = "";
+
             for (int i = 0; i < el.size(); i++) {
                 if (i == el.size() - 1) {
                     joinWhereConditions += el.getExpression(i).toString();
                 } else {
-                    joinWhereConditions += el.getExpression(i).toString() + " AND ";
+                    joinWhereConditions += el.getExpression(i).toString() + " and ";
                 }
             }
             pre_query = SqlQueryParser.addWhereClause(pre_query, joinWhereConditions);
@@ -499,7 +519,7 @@ public class Test {
 
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("select * from persons where name='Bechara' or age<20 and id<2", 500, 2);
+        x.generalizeQuery("select * from persons,t where t.id=persons.id and persons.id=t.id and name='Bechara' or age<20 and id<2", 500, 2);
     }
 
 }

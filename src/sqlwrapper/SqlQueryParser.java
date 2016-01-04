@@ -53,6 +53,7 @@ public class SqlQueryParser {
         ArrayList<String> tables = new ArrayList<String>();
         try {
             TSelectSqlStatement select = (TSelectSqlStatement) sqlParser.sqlstatements.get(0);
+         
             for (int i = 0; i < select.tables.size(); i++) {
                 tables.add(select.tables.getTable(i).toString());
             }

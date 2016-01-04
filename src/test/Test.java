@@ -67,6 +67,7 @@ public class Test {
     private String generalizedQuery = "";
     private Connection conn = null;
     private String joinWhereConditions = "";
+    private boolean continueToNextOperand = true;
 
     public Connection loadDriver() throws SQLException, InstantiationException, IllegalAccessException {
 
@@ -92,7 +93,7 @@ public class Test {
 
             String whereConditions = where.getCondition().toString();
             String pre_query = buildPreQuery(query);
-            
+
             //Remove join conditions from the where clause to generalize the values without join conditions
             if (!joinWhereConditions.equals("")) {
                 Pattern p = Pattern.compile("(and |or )+" + joinWhereConditions + "( )?");
@@ -121,37 +122,51 @@ public class Test {
             StringBuffer postfix = new StringBuffer(whereConditions.length());
             String c;
             String[] infixList = whereConditions.split(" ");
-            boolean continueToNext = true;
             for (int i = 0; i < infixList.length; i++) {
-                c = infixList[i];
-                if (i == infixList.length - 1) {
-                    stack.push(c);
-                    while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), continueToNext, hash, utility, privacy)) {
-                        String pop = stack.pop();
-                        if (!c.equals("(") || !c.equals(")")) {
-                            postfix.append(pop);
-                        } else {
-                        }
-                    }
-                    stack.push(c);
-                }
-                if (!isOperator(c)) {
-                    stack.push(c);
+                if (!continueToNextOperand) {
+                    // generalizedQuery += infixList[i] + " ";
+                    break;
                 } else {
-                    while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), continueToNext, hash, utility, privacy)) {
-                        String pop = stack.pop();
-                        if (!c.equals("(") || !c.equals(")")) {
-                            postfix.append(pop);
-                        } else {
+                    c = infixList[i];
+                    if (i == infixList.length - 1) {
+                        stack.push(c);
+                        while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), hash, utility, privacy)) {
+                            String pop = stack.pop();
+                            if (!c.equals("(") || !c.equals(")")) {
+                                postfix.append(pop);
+                            } else {
+                            }
                         }
+                        stack.push(c);
                     }
-                    stack.push(c);
+                    if (!isOperator(c)) {
+                        stack.push(c);
+                    } else {
+                        while (!stack.isEmpty() && isLowerPrecedence(c, stack.peek(), hash, utility, privacy)) {
+                            String pop = stack.pop();
+                            if (!c.equals("(") || !c.equals(")")) {
+                                postfix.append(pop);
+                            } else {
+                            }
+                        }
+                        stack.push(c);
+                    }
                 }
             }
             while (!stack.isEmpty()) {
                 postfix.append(stack.pop());
             }
-            System.out.println(SqlQueryParser.setWhereClause(query, generalizedQuery));
+            generalizedQuery = SqlQueryParser.setWhereClause(query, generalizedQuery);
+            System.out.println(generalizedQuery);
+
+            if (groupBy!=null) {
+               int groupByHash= Math.abs(generalizedQuery.hashCode());
+               
+               // send the generalized query to the server and cache the result
+                cacheResult(st.executeQuery(generalizedQuery),groupByHash);
+                ResultSet rs = st.executeQuery("select * from tbl_"+groupByHash+" "+ where.getCondition().toString());
+               // st.executeQuery();
+            }
 
         } catch (SQLException ex) {
             Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
@@ -259,7 +274,6 @@ public class Test {
                     }
                 }
             }
-
         } catch (SQLException ex) {
             Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
         } catch (InstantiationException ex) {
@@ -271,20 +285,33 @@ public class Test {
         return generalizedValues;
     }
 
-    private boolean isLowerPrecedence(String operator, String operand, Boolean continueToNext, int hash, int utility, int privacy) {
+    private boolean isLowerPrecedence(String operator, String operand, int hash, int utility, int privacy) {
+        String generalizedvalue = generalizeValueAndCheckPrivacy(operand, operator, hash, utility, privacy);
         switch (operator) {
+
             case "and":
-                generalizedQuery += generalizeValueAndCheckPrivacy(operand, operator, hash, utility, privacy) + " and ";
+                if (generalizedvalue.equals("")) {
+                    generalizedQuery += operand + " " + operator + " ";
+                    continueToNextOperand = true;
+                } else {
+                    generalizedQuery += generalizedvalue;
+                    continueToNextOperand = false;
+                }
                 return (operand == "AND");
 
             case "or":
-                generalizedQuery += generalizeValueAndCheckPrivacy(operand, operator, hash, utility, privacy) + " or ";
+                if (generalizedvalue.equals("")) {
+                    generalizedQuery += operand + operator;
+                    continueToNextOperand = true;
+                } else {
+                    generalizedQuery += generalizedvalue + " or ";
+                    continueToNextOperand = true;
+                }
                 return (operand == "OR");
 
             default:
                 //last value with no next operator
                 generalizedQuery += generalizeValueAndCheckPrivacy(operand, "", hash, utility, privacy);
-                continueToNext = false;
                 return false;
         }
     }
@@ -519,7 +546,7 @@ public class Test {
 
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("select * from persons,t where t.id=persons.id and persons.id=t.id and name='Bechara' or age<20 and id<2", 500, 2);
+        x.generalizeQuery("select * from persons where name='Bechara' or age<20 and id>2", 100, 4);
     }
 
 }

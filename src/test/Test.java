@@ -63,7 +63,7 @@ public class Test {
     String user = "root";
     String pass = "";
     String url = "jdbc:mysql://localhost:3306/";
-    String dbName = "test";
+    String dbName = "data";
     private String generalizedQuery = "";
     private Connection conn = null;
     private String joinWhereConditions = "";
@@ -74,14 +74,14 @@ public class Test {
         Connection cn = null;
         try {
             Class.forName("com.mysql.jdbc.Driver").newInstance();
-            cn = DriverManager.getConnection(url + dbName, user, pass);
+            conn = DriverManager.getConnection(url + dbName, user, pass);
 
         } catch (ClassNotFoundException ex) {
             System.err.println("\nUnable to load the JDBC driver ");
             System.err.println("Please check your CLASSPATH.");
             ex.printStackTrace(System.err);
         }
-        return cn;
+        return conn;
 
     }
 
@@ -90,7 +90,8 @@ public class Test {
         try {
             TWhereClause where = SqlQueryParser.getWhereClause(query);
             TGroupBy groupBy = SqlQueryParser.getGroupBy(query);
-
+            ArrayList<String> attributes = SqlQueryParser.getAttributes(query);
+            loadDriver();
             String whereConditions = where.getCondition().toString();
             String pre_query = buildPreQuery(query);
 
@@ -112,10 +113,11 @@ public class Test {
             }
             int hash = Math.abs(pre_query.hashCode());
 
-            Statement st = loadDriver().createStatement();
+            Statement st = conn.createStatement();
 
             if (!checkTableExists("TBL_" + hash)) {
-                cacheResult(st.executeQuery(pre_query), hash);
+                ResultSet rs= st.executeQuery(pre_query);
+                cacheResult(rs, hash);
             }
 
             Stack<String> stack = new Stack<String>();
@@ -159,13 +161,25 @@ public class Test {
             generalizedQuery = SqlQueryParser.setWhereClause(query, generalizedQuery);
             System.out.println(generalizedQuery);
 
-            if (groupBy!=null) {
-               int groupByHash= Math.abs(generalizedQuery.hashCode());
-               
-               // send the generalized query to the server and cache the result
-                cacheResult(st.executeQuery(generalizedQuery),groupByHash);
-                ResultSet rs = st.executeQuery("select * from tbl_"+groupByHash+" "+ where.getCondition().toString());
-               // st.executeQuery();
+            if (groupBy != null) {
+                int groupByHash = Math.abs(generalizedQuery.hashCode());
+
+//            send the generalized query to the server and cache the result
+                cacheResult(st.executeQuery(generalizedQuery), groupByHash);
+
+                String selectlist = "";
+                for (int i = 0; i < attributes.size(); i++) {
+                    if (i == attributes.size() - 1) {
+                        selectlist += attributes.get(i);
+                    } else {
+                        selectlist += attributes.get(i) + ",";
+                    }
+                }
+
+                //execute the original query without the GROUP BY clause on the result of the generalized query
+                ResultSet rs = st.executeQuery("select " + selectlist + " from tbl_" + groupByHash + " " + where.getCondition().toString());
+                // st.executeQuery();                     
+                // execute all of the original query on the previous result and send it back to the user
             }
 
         } catch (SQLException ex) {
@@ -182,9 +196,9 @@ public class Test {
 
         String generalizedValues = "";
         try {
-            Statement st = loadDriver().createStatement();
+            Statement st = conn.createStatement();
 
-            String[] t = condition.split("[<=>]");
+            String[] t = condition.split("<=|>=|<|=|>");
             String attribute = t[0].toString();
             String valueRequested = t[1];//'value'
 
@@ -233,7 +247,7 @@ public class Test {
                 if (generalizedValues.equals("")) {
                     return "";
                 }
-            } else if (condition.contains("<")) {
+            } else if (condition.contains("<=") || condition.contains("<") || condition.contains("=")) {
                 int alpha = 5;
                 while (!satisfait) {
                     nbOfTuples = 0;
@@ -253,7 +267,7 @@ public class Test {
                         alpha += alpha;
                     }
                 }
-            } else if (condition.contains(">")) {
+            } else if (condition.contains(">=") || condition.contains(">")) {
                 int alpha = 5;
                 while (!satisfait) {
                     nbOfTuples = 0;
@@ -275,10 +289,6 @@ public class Test {
                 }
             }
         } catch (SQLException ex) {
-            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (InstantiationException ex) {
-            Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
-        } catch (IllegalAccessException ex) {
             Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
         }
 
@@ -327,7 +337,7 @@ public class Test {
         ArrayList<String> tables = SqlQueryParser.getTables(query);
         ArrayList<String> attributes = new ArrayList<>();
         for (String condition : conditions) {
-            String[] c = condition.split("[=<>]");
+            String[] c = condition.split("<=|>=|<|=|>");
             attributes.add(c[0]);
         }
         String pre_query = "SELECT ";
@@ -414,8 +424,7 @@ public class Test {
 
     private boolean checkTableExists(String tableName) {
         try {
-            Connection con = loadDriver();
-            DatabaseMetaData metaData = con.getMetaData();
+            DatabaseMetaData metaData = conn.getMetaData();
             String SCHEMA_NAME = "${YOUR_SCHEMA_NAME}";
             String tableType[] = {"TABLE"};
             ArrayList<String> queries = new ArrayList<>();
@@ -430,21 +439,13 @@ public class Test {
             Logger.getLogger(Test.class
                     .getName()).log(Level.SEVERE, null, ex);
 
-        } catch (InstantiationException ex) {
-            Logger.getLogger(Test.class
-                    .getName()).log(Level.SEVERE, null, ex);
-
-        } catch (IllegalAccessException ex) {
-            Logger.getLogger(Test.class
-                    .getName()).log(Level.SEVERE, null, ex);
         }
         return false;
     }
 
     private void cacheResult(ResultSet rs, int hashcode) {
         try {
-            Connection con = loadDriver();
-            Statement stp = con.createStatement();
+            Statement stp = conn.createStatement();
             StringBuilder sbCreateTable = new StringBuilder(1024);
 
             ResultSetMetaData rsmd = rs.getMetaData();
@@ -501,13 +502,6 @@ public class Test {
             Logger.getLogger(Test.class
                     .getName()).log(Level.SEVERE, null, ex);
 
-        } catch (InstantiationException ex) {
-            Logger.getLogger(Test.class
-                    .getName()).log(Level.SEVERE, null, ex);
-
-        } catch (IllegalAccessException ex) {
-            Logger.getLogger(Test.class
-                    .getName()).log(Level.SEVERE, null, ex);
         } finally {
             try {
                 rs.close();
@@ -546,7 +540,7 @@ public class Test {
 
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("select * from persons where name='Bechara' or age<20 and id>2", 100, 4);
+        x.generalizeQuery("SELECT * FROM csvdata where location='mexican' or age<20 and id<300 ", 1000, 2);
     }
 
 }

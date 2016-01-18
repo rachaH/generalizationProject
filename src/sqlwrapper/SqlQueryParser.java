@@ -6,6 +6,7 @@
 package sqlwrapper;
 
 import gudusoft.gsqlparser.EDbVendor;
+import gudusoft.gsqlparser.EExpressionType;
 import gudusoft.gsqlparser.TGSqlParser;
 import gudusoft.gsqlparser.nodes.TGroupBy;
 import gudusoft.gsqlparser.nodes.TResultColumnList;
@@ -13,6 +14,7 @@ import gudusoft.gsqlparser.nodes.TWhenClauseItem;
 import gudusoft.gsqlparser.nodes.TWhereClause;
 import gudusoft.gsqlparser.stmt.TSelectSqlStatement;
 import java.util.ArrayList;
+import test.Test;
 
 /**
  *
@@ -34,7 +36,9 @@ public class SqlQueryParser {
         try {
             selectAttributes = sqlParser.sqlstatements.get(0).getResultColumnList();
             for (int i = 0; i < selectAttributes.size(); i++) {
-                attributes.add(selectAttributes.getResultColumn(i).toString());
+                if (selectAttributes.getResultColumn(i).getExpr().getExpressionType().equals(EExpressionType.simple_object_name_t)) {
+                    attributes.add(selectAttributes.getResultColumn(i).toString());
+                }
             }
         } catch (Exception ex) {
         }
@@ -53,7 +57,7 @@ public class SqlQueryParser {
         ArrayList<String> tables = new ArrayList<String>();
         try {
             TSelectSqlStatement select = (TSelectSqlStatement) sqlParser.sqlstatements.get(0);
-         
+
             for (int i = 0; i < select.tables.size(); i++) {
                 tables.add(select.tables.getTable(i).toString());
             }
@@ -109,6 +113,7 @@ public class SqlQueryParser {
         return pstmt.toString();
     }
 
+    
     public static TGroupBy getGroupBy(String query) {
         TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);
         sqlParser.sqltext = query;

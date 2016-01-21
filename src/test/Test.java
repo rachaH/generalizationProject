@@ -86,6 +86,7 @@ public class Test {
     public String generalizeQuery(String query, int utility, int privacy) {
 
         try {
+            System.out.println("Original query : " + query);
             this.originalQuery = query;
             this.whereClause = SqlQueryParser.getWhereClause(query);
             this.attributes = SqlQueryParser.getAttributes(query);
@@ -96,7 +97,7 @@ public class Test {
             long start = System.currentTimeMillis();
             String pre_query = buildPreQuery(query);
             long fin = System.currentTimeMillis();
-            System.out.println("Pre-Query Building time : " + (fin - start));
+            System.out.println("Pre-Query Building time : " + (fin - start) + " ms");
 
             //Remove join conditions from the where clause to generalize the values without join conditions
             if (!joinWhereConditions.equals("")) {
@@ -115,40 +116,58 @@ public class Test {
             }
 
             int hash = Math.abs(pre_query.hashCode());
-            System.out.println(pre_query);
+            System.out.println("Pre-Query : " + pre_query);
             if (!checkTableExists("TBL_" + hash)) {
                 QueryResult result = mySqlWrapperServer.executeQuery(pre_query);
                 while (result.hasNext()) {
                     ResultSet rs = (ResultSet) result.next();
-                    start = System.currentTimeMillis();
-                    cacheResult(rs, hash,true);
-                    fin = System.currentTimeMillis();
-                    System.out.println("Caching time : " + (fin - start));
+                    if (rs != null) {
+                        start = System.currentTimeMillis();
+                        cacheResult(rs, hash, true);
+                        fin = System.currentTimeMillis();
+                        System.out.println("Caching time of the Pre-query result : " + (fin - start) + " ms");
+                    } else {
+                        break;
+                    }
 
                 }
             }
+            start = System.currentTimeMillis();
             readingThroughWhereTree(hash, utility, privacy);
+            fin = System.currentTimeMillis();
+            System.out.println("Generalization time : " + (fin - start) + " ms");
 
             generalizedQuery = SqlQueryParser.setWhereClause(query, generalizedQuery);
-            System.out.println(generalizedQuery);
+            System.out.println("Generalization query : " + generalizedQuery);
 
             if (groupBy != null) {
                 groupByProcess();
             } else {
                 //send the generalized query to the server
                 int generalizedQuery_hash = Math.abs(generalizedQuery.hashCode());
-                QueryResult result = mySqlWrapperServer.executeQuery(generalizedQuery);
-                while (result.hasNext()) {
-                    ResultSet rs = (ResultSet) result.next();
-                    cacheResult(rs, generalizedQuery_hash,false);
+                if (!checkTableExists("tbl_" + generalizedQuery_hash)) {
+                    QueryResult result = mySqlWrapperServer.executeQuery(generalizedQuery);
+                    while (result.hasNext()) {
+                        ResultSet rs = (ResultSet) result.next();
+                        if (rs != null) {
+                            start = System.currentTimeMillis();
+                            cacheResult(rs, generalizedQuery_hash, false);
+                            fin = System.currentTimeMillis();
+                            System.out.println("Caching Time of the generalization result : " + (fin - start) + " ms");
+                        } else {
+                            break;
+                        }
+                    }
                 }
-
                 //execute the original query on the generalized result
-                int originalQuery_hash = Math.abs(query.hashCode());
-                QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(query);
+                String selectList = getSelectList();
+                String newQuery = "select " + selectList + " from tbl_" + generalizedQuery_hash + " where " + whereConditions;
+                System.out.println("Executing final query :"+newQuery);
+                QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newQuery);
                 while (resultOriginal.hasNext()) {
                     ResultSet rs = (ResultSet) resultOriginal.next();
                     //send it to the client
+                    System.out.println("Done");
                 }
 
             }
@@ -247,7 +266,7 @@ public class Test {
                             while (resultUtility.hasNext()) {
                                 ResultSet rs = (ResultSet) resultUtility.next();
                                 while (rs.next()) {
-                                    nbOfTuples = rs.getInt(1);
+                                    nbOfTuples = rs.getInt(0);
                                 }
                             }
 
@@ -334,17 +353,10 @@ public class Test {
         QueryResult result = mySqlWrapperServer.executeQuery(generalizedQuery);
         while (result.hasNext()) {
             ResultSet rs = (ResultSet) result.next();
-            cacheResult(rs, generalizedQuery_hash,false);
+            cacheResult(rs, generalizedQuery_hash, false);
         }
 
-        String selectlist = "";
-        for (int i = 0; i < attributes.size(); i++) {
-            if (i == attributes.size() - 1) {
-                selectlist += attributes.get(i);
-            } else {
-                selectlist += attributes.get(i) + ",";
-            }
-        }
+        String selectlist = getSelectList();
 
         //execute the original query without the GROUP BY clause on the result of the generalized query
         String originalQueryWithoutGroupBy = "select " + selectlist + " from tbl_" + generalizedQuery_hash + " " + whereClause.getCondition().toString();
@@ -352,11 +364,12 @@ public class Test {
         QueryResult resultWithoutGroupBy = mySqlWrapperLocal.executeQuery(originalQueryWithoutGroupBy);
         while (resultWithoutGroupBy.hasNext()) {
             ResultSet rs = (ResultSet) resultWithoutGroupBy.next();
-            cacheResult(rs, originalQueryWithoutGroupBy_hash,false);
+            cacheResult(rs, originalQueryWithoutGroupBy_hash, false);
         }
 
         // execute all of the original query on the previous result and send it back to the user
         int originalQuery_hash = Math.abs(originalQuery.hashCode());
+        String newGroupByQuery = SqlQueryParser.changeTable(originalQuery, "tbl_" + originalQueryWithoutGroupBy_hash);
         QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(originalQuery);
         while (resultOriginal.hasNext()) {
             ResultSet rs = (ResultSet) resultOriginal.next();
@@ -443,13 +456,10 @@ public class Test {
                         } else {
                             insertData += rsmd.getColumnLabel(i) + ",";
                         }
-                    }
-                    else{
-                     if (i == columnCount) {
-                            insertData += rsmd.getColumnLabel(i)+") VALUES(";
-                        } else {
-                            insertData += rsmd.getColumnLabel(i) + ",";
-                        }   
+                    } else if (i == columnCount) {
+                        insertData += rsmd.getColumnLabel(i) + ") VALUES(";
+                    } else {
+                        insertData += rsmd.getColumnLabel(i) + ",";
                     }
                 }
                 for (int i = 1; i <= columnCount; i++) {
@@ -477,13 +487,13 @@ public class Test {
                     .getName()).log(Level.SEVERE, null, ex);
 
         } finally {
-            try {
-                rs.close();
-
-            } catch (SQLException ex) {
-                Logger.getLogger(Test.class
-                        .getName()).log(Level.SEVERE, null, ex);
-            }
+//            try {
+//                rs.close();
+//
+//            } catch (SQLException ex) {
+//                Logger.getLogger(Test.class
+//                        .getName()).log(Level.SEVERE, null, ex);
+//            }
         }
 
     }
@@ -615,9 +625,21 @@ public class Test {
         return true;
     }
 
+    public String getSelectList() {
+        String selectlist = "";
+        for (int i = 0; i < attributes.size(); i++) {
+            if (i == attributes.size() - 1) {
+                selectlist += attributes.get(i);
+            } else {
+                selectlist += attributes.get(i) + ",";
+            }
+        }
+        return selectlist;
+    }
+
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='netflix movies'", 300, 5);
+        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='vaniqa.comh'", 50, 5);
     }
 
 }

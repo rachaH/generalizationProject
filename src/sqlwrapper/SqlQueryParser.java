@@ -9,11 +9,18 @@ import gudusoft.gsqlparser.EDbVendor;
 import gudusoft.gsqlparser.EExpressionType;
 import gudusoft.gsqlparser.TGSqlParser;
 import gudusoft.gsqlparser.nodes.TGroupBy;
+import gudusoft.gsqlparser.nodes.TJoin;
+import gudusoft.gsqlparser.nodes.TJoinList;
+import gudusoft.gsqlparser.nodes.TObjectName;
 import gudusoft.gsqlparser.nodes.TResultColumnList;
+import gudusoft.gsqlparser.nodes.TTable;
+import gudusoft.gsqlparser.nodes.TTableList;
 import gudusoft.gsqlparser.nodes.TWhenClauseItem;
 import gudusoft.gsqlparser.nodes.TWhereClause;
 import gudusoft.gsqlparser.stmt.TSelectSqlStatement;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import test.Test;
 
 /**
@@ -57,7 +64,7 @@ public class SqlQueryParser {
         ArrayList<String> tables = new ArrayList<String>();
         try {
             TSelectSqlStatement select = (TSelectSqlStatement) sqlParser.sqlstatements.get(0);
-
+            
             for (int i = 0; i < select.tables.size(); i++) {
                 tables.add(select.tables.getTable(i).toString());
             }
@@ -82,7 +89,7 @@ public class SqlQueryParser {
         }
         return pstmt.getWhereClause();
     }
-
+    
     public static String addWhereClause(String query, String whereClause) {
         TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);
         sqlParser.sqltext = query;
@@ -95,13 +102,38 @@ public class SqlQueryParser {
         }
         return pstmt.toString();
     }
-
-    public static String setWhereClause(String query, String whereClause) {
-
+    
+    public static String changeTable(String query, String tableName) {
         TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);
         sqlParser.sqltext = query;
         sqlParser.parse();
-
+        TSelectSqlStatement pstmt = null;
+        try {
+            pstmt = (TSelectSqlStatement) sqlParser.getSqlstatements().get(0);
+            if (pstmt.joins != null) {
+                for (int i = 0; i < pstmt.joins.size(); i++) {
+                    TJoin join = pstmt.joins.getJoin(i);
+                    if (join.getTable().isBaseTable()) {
+                        pstmt.joins.removeJoin(i);
+                    }
+                }
+                TJoin j= pstmt.joins.getJoin(0);
+                j.setString(tableName);
+                pstmt.joins.addJoin(j);
+            }
+            
+        } catch (Exception ex) {
+            System.out.println(ex.toString());
+        }
+        return pstmt.toString();
+    }
+    
+    public static String setWhereClause(String query, String whereClause) {
+        
+        TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);
+        sqlParser.sqltext = query;
+        sqlParser.parse();
+        
         TSelectSqlStatement pstmt = null;
         try {
             pstmt = (TSelectSqlStatement) sqlParser.getSqlstatements().get(0);
@@ -112,7 +144,6 @@ public class SqlQueryParser {
         }
         return pstmt.toString();
     }
-
     
     public static TGroupBy getGroupBy(String query) {
         TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);

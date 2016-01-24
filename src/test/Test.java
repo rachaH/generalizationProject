@@ -372,7 +372,6 @@ public class Test {
     }
 
     private void groupByProcess() {
-
         //send the generalized query to the server and cache the result
         String query = removeGroupBy(generalizedQuery, groupBy.toString());
         query = SqlQueryParser.removeAggregateFunctions(query);
@@ -604,7 +603,6 @@ public class Test {
     private boolean isLowerPrecedence(String operator, String operand, int hash, int utility, int privacy) {
         String generalizedvalue = generalizeValueAndCheckPrivacy(operand, operator, hash, utility, privacy);
         switch (operator.toLowerCase()) {
-
             case "and":
                 if (generalizedvalue.equals("")) {
                     generalizedQuery += operand + " " + operator + " ";

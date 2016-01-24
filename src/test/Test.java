@@ -513,7 +513,7 @@ public class Test {
                 }
                 Statement st = localCon.createStatement();
                 st.executeUpdate(insertData);
-                localCon.commit();
+                
 
             }
 
@@ -522,6 +522,8 @@ public class Test {
                     .getName()).log(Level.SEVERE, null, ex);
 
         } finally {
+            try {
+                localCon.commit();
 //            try {
 //                rs.close();
 //
@@ -529,6 +531,9 @@ public class Test {
 //                Logger.getLogger(Test.class
 //                        .getName()).log(Level.SEVERE, null, ex);
 //            }
+            } catch (SQLException ex) {
+                Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
+            }
         }
 
     }
@@ -682,7 +687,7 @@ public class Test {
 
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='merit release appearance' and AnonId<200", 1000, 5);
+        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='americanflag'", 1000, 5);
     }
 
 }

@@ -65,6 +65,7 @@ public class Test {
     private MySQLWrapper mySqlWrapperServer;
     private MySQLWrapper mySqlWrapperLocal;
     private TWhereClause whereClause;
+    private TGroupBy groupBy;
     private ArrayList<String> attributes;
     private ArrayList<String> tables;
     private String originalQuery;
@@ -91,7 +92,7 @@ public class Test {
             this.whereClause = SqlQueryParser.getWhereClause(query);
             this.attributes = SqlQueryParser.getAttributes(query);
             this.tables = SqlQueryParser.getTables(query);
-            TGroupBy groupBy = SqlQueryParser.getGroupBy(query);
+            this.groupBy = SqlQueryParser.getGroupBy(query);
             String whereConditions = whereClause.getCondition().toString();
 
             long start = System.currentTimeMillis();
@@ -138,11 +139,10 @@ public class Test {
             System.out.println("Generalization time : " + (fin - start) + " ms");
 
             generalizedQuery = SqlQueryParser.setWhereClause(query, generalizedQuery);
-            System.out.println("Generalization query : " + generalizedQuery);
-
             if (groupBy != null) {
                 groupByProcess();
             } else {
+                System.out.println("Generalization query : " + generalizedQuery);
                 //send the generalized query to the server
                 int generalizedQuery_hash = Math.abs(generalizedQuery.hashCode());
                 if (!checkTableExists("tbl_" + generalizedQuery_hash)) {
@@ -160,9 +160,9 @@ public class Test {
                     }
                 }
                 //execute the original query on the generalized result
-                String selectList = getSelectList();
+                String selectList = getSelectList(attributes);
                 String newQuery = "select " + selectList + " from tbl_" + generalizedQuery_hash + " where " + whereConditions;
-                System.out.println("Executing final query :"+newQuery);
+                System.out.println("Executing final query :" + newQuery);
                 QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newQuery);
                 while (resultOriginal.hasNext()) {
                     ResultSet rs = (ResultSet) resultOriginal.next();
@@ -180,10 +180,23 @@ public class Test {
 
     private void readingThroughWhereTree(int hash, int utility, int privacy) {
         generalizedQuery = "where ";
+        String whereConditions = whereClause.getCondition().toString();
         Stack<String> stack = new Stack<String>();
-        StringBuffer postfix = new StringBuffer(whereClause.getCondition().toString().length());
+        StringBuffer postfix = new StringBuffer(whereConditions.length());
         String c;
-        String[] infixList = whereClause.getCondition().toString().split("\\s(and|or)|(and|or)\\s");
+        Pattern p = Pattern.compile("( and | or )+");
+        Matcher m = p.matcher(whereConditions.toLowerCase());
+        for (int i = 0; i <= m.groupCount(); i++) {
+            if (m.find()) {
+                if (m.group(i).contains("and")) {
+                    whereConditions = whereConditions.replace(m.group(i), "   and   ");
+                } else {
+                    whereConditions = whereConditions.replace(m.group(i), "   or   ");
+                }
+
+            }
+        }
+        String[] infixList = whereConditions.split("\\s\\s\\s");
         for (int i = 0; i < infixList.length; i++) {
             if (!continueToNextOperand) {
                 // generalizedQuery += infixList[i] + " ";
@@ -262,14 +275,19 @@ public class Test {
                     if (values.size() >= privacy) {
                         commonString = this.identifyCommonSubStrOfNStr(values);
                         if (commonString != "") {
-                            QueryResult resultUtility = mySqlWrapperLocal.executeQuery("select sum(rowCount) from TBL_" + hash + " where " + attribute + " LIKE '%" + commonString + "%'");
-                            while (resultUtility.hasNext()) {
-                                ResultSet rs = (ResultSet) resultUtility.next();
-                                while (rs.next()) {
-                                    nbOfTuples = rs.getInt(0);
-                                }
+                            Statement stp = localCon.createStatement();
+                            ResultSet rs = stp.executeQuery("select sum(rowCount) from TBL_" + hash + " where " + attribute + " LIKE '%" + commonString + "%'");
+                            while (rs.next()) {
+                                nbOfTuples = rs.getInt(1);
                             }
 
+//                            QueryResult resultUtility = mySqlWrapperLocal.executeQuery("select sum(rowCount) from TBL_" + hash + " where " + attribute + " LIKE '%" + commonString + "%'");
+//                            while (resultUtility.hasNext()) {
+//                                ResultSet rs = (ResultSet) resultUtility.next();
+//                                while (rs.next()) {
+//                                    nbOfTuples = rs.getInt(1);
+//                                }
+//                            }
                             if (nbOfTuples <= utility) {
                                 satisfait = true;
                                 generalizedValues += attribute + " LIKE '%" + commonString + "%'";
@@ -292,11 +310,14 @@ public class Test {
                     int diverseRows = 0;
                     while (result.hasNext()) {
                         ResultSet rs = (ResultSet) result.next();
-                        while (rs.next()) {
-                            nbOfTuples += rs.getInt(1);
+                        if (rs != null) {
+                            while (rs.next()) {
+                                nbOfTuples += rs.getInt(1);
+                            }
+                            rs.last();
+                            diverseRows = rs.getRow();
+                            break;
                         }
-                        rs.last();
-                        diverseRows = rs.getRow();
                     }
 
                     if (nbOfTuples <= utility && diverseRows >= privacy) {
@@ -317,19 +338,22 @@ public class Test {
                         int diverseRows = 0;
                         while (result.hasNext()) {
                             ResultSet rs = (ResultSet) result.next();
-                            while (rs.next()) {
-                                nbOfTuples += rs.getInt(1);
-                            }
-                            rs.last();
-                            diverseRows = rs.getRow();
-                        }
-                        QueryResult resultUtility = mySqlWrapperLocal.executeQuery("select sum(rowcount) from TBL_" + hash + " where " + attribute + " > " + value);
-                        while (result.hasNext()) {
-                            ResultSet rs = (ResultSet) result.next();
-                            while (rs.next()) {
-                                nbOfTuples = rs.getInt(1);
+                            if (rs != null) {
+                                while (rs.next()) {
+                                    nbOfTuples += rs.getInt(1);
+                                }
+                                rs.last();
+                                diverseRows = rs.getRow();
+                                break;
                             }
                         }
+//                        QueryResult resultUtility = mySqlWrapperLocal.executeQuery("select sum(rowcount) from TBL_" + hash + " where " + attribute + " > " + value);
+//                        while (result.hasNext()) {
+//                            ResultSet rs = (ResultSet) result.next();
+//                            while (rs.next()) {
+//                                nbOfTuples = rs.getInt(1);
+//                            }
+//                        }
                         if (nbOfTuples <= utility && diverseRows >= privacy) {
                             satisfait = true;
                             generalizedValues += attribute + " > " + value;
@@ -348,31 +372,43 @@ public class Test {
     }
 
     private void groupByProcess() {
-        //send the generalized query to the server and cache the result
-        int generalizedQuery_hash = Math.abs(generalizedQuery.hashCode());
-        QueryResult result = mySqlWrapperServer.executeQuery(generalizedQuery);
-        while (result.hasNext()) {
-            ResultSet rs = (ResultSet) result.next();
-            cacheResult(rs, generalizedQuery_hash, false);
-        }
 
-        String selectlist = getSelectList();
+        //send the generalized query to the server and cache the result
+        String query = removeGroupBy(generalizedQuery, groupBy.toString());
+        query = SqlQueryParser.removeAggregateFunctions(query);
+        System.out.println("Generalization Query : " + query);
+        int generalizedQuery_hash = Math.abs(query.hashCode());
+        if (!checkTableExists("tbl_" + generalizedQuery_hash)) {
+            QueryResult result = mySqlWrapperServer.executeQuery(query);
+            while (result.hasNext()) {
+                ResultSet rs = (ResultSet) result.next();
+                if (rs != null) {
+                    long start = System.currentTimeMillis();
+                    cacheResult(rs, generalizedQuery_hash, false);
+                    long fin = System.currentTimeMillis();
+                    System.out.println("Caching Time of the generalization result : " + (fin - start) + " ms");
+                } else {
+                    break;
+                }
+            }
+        }
+        String selectlist = getSelectList(SqlQueryParser.getAttributesWithoutAggregate(query));
 
         //execute the original query without the GROUP BY clause on the result of the generalized query
-        String originalQueryWithoutGroupBy = "select " + selectlist + " from tbl_" + generalizedQuery_hash + " " + whereClause.getCondition().toString();
+        String originalQueryWithoutGroupBy = "select " + selectlist + " from tbl_" + generalizedQuery_hash + " where " + whereClause.getCondition().toString();
         int originalQueryWithoutGroupBy_hash = Math.abs(originalQueryWithoutGroupBy.hashCode());
         QueryResult resultWithoutGroupBy = mySqlWrapperLocal.executeQuery(originalQueryWithoutGroupBy);
         while (resultWithoutGroupBy.hasNext()) {
             ResultSet rs = (ResultSet) resultWithoutGroupBy.next();
             cacheResult(rs, originalQueryWithoutGroupBy_hash, false);
         }
-
-        // execute all of the original query on the previous result and send it back to the user
-        int originalQuery_hash = Math.abs(originalQuery.hashCode());
-        String newGroupByQuery = SqlQueryParser.changeTable(originalQuery, "tbl_" + originalQueryWithoutGroupBy_hash);
-        QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(originalQuery);
-        while (resultOriginal.hasNext()) {
-            ResultSet rs = (ResultSet) resultOriginal.next();
+        if (checkTableExists("tbl_"+originalQueryWithoutGroupBy_hash)) {
+            // execute all of the original query on the previous result and send it back to the user
+            String newOriginalQuery = "select " + getSelectList(attributes) + " from tbl_" + originalQueryWithoutGroupBy_hash + " where " + whereClause.getCondition().toString() + " " + groupBy;
+            QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newOriginalQuery);
+            while (resultOriginal.hasNext()) {
+                ResultSet rs = (ResultSet) resultOriginal.next();
+            }
         }
     }
 
@@ -625,7 +661,7 @@ public class Test {
         return true;
     }
 
-    public String getSelectList() {
+    public String getSelectList(ArrayList<String> attributes) {
         String selectlist = "";
         for (int i = 0; i < attributes.size(); i++) {
             if (i == attributes.size() - 1) {
@@ -637,9 +673,18 @@ public class Test {
         return selectlist;
     }
 
+    public String removeGroupBy(String query, String groupBy) {
+        Pattern p = Pattern.compile(groupBy);
+        Matcher m = p.matcher(query.toLowerCase());
+        if (m.find()) {
+            query = query.replace(m.group(), "");
+        }
+        return query;
+    }
+
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='vaniqa.comh'", 50, 5);
+        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='merit release appearance' and AnonId<200", 1000, 5);
     }
 
 }

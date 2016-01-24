@@ -34,7 +34,7 @@ public class SqlQueryParser {
      * @param query
      * @return ArrayList of attributes from the query
      */
-    public static ArrayList<String> getAttributes(String query) {
+    public static ArrayList<String> getAttributesWithoutAggregate(String query) {
         TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);
         sqlParser.sqltext = query;
         sqlParser.parse();
@@ -52,6 +52,42 @@ public class SqlQueryParser {
         return attributes;
     }
 
+    
+ public static ArrayList<String> getAttributes(String query) {
+        TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);
+        sqlParser.sqltext = query;
+        sqlParser.parse();
+        TResultColumnList selectAttributes;
+        ArrayList<String> attributes = new ArrayList<String>();
+        try {
+            selectAttributes = sqlParser.sqlstatements.get(0).getResultColumnList();
+            for (int i = 0; i < selectAttributes.size(); i++) {
+                  attributes.add(selectAttributes.getResultColumn(i).toString());
+                
+            }
+        } catch (Exception ex) {
+        }
+        return attributes;
+    }    
+     public static String removeAggregateFunctions(String query) {
+        TGSqlParser sqlParser = new TGSqlParser(EDbVendor.dbvhive);
+        sqlParser.sqltext = query;
+        sqlParser.parse();
+        TResultColumnList selectAttributes;
+        ArrayList<String> attributes = new ArrayList<String>();
+        TSelectSqlStatement pstmt=null;
+        try {
+            pstmt = (TSelectSqlStatement) sqlParser.sqlstatements.get(0);
+            selectAttributes =pstmt.getResultColumnList();
+            for (int i = 0; i < selectAttributes.size(); i++) {
+                 if (selectAttributes.getResultColumn(i).getExpr().getExpressionType().equals(EExpressionType.function_t)) {
+                    selectAttributes.removeResultColumn(i);
+                }
+            }
+        } catch (Exception ex) {
+        }
+        return pstmt.toString();
+    } 
     /**
      *
      * @param query

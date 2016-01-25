@@ -165,9 +165,14 @@ public class Test {
                 System.out.println("Executing final query :" + newQuery);
                 QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newQuery);
                 while (resultOriginal.hasNext()) {
+
                     ResultSet rs = (ResultSet) resultOriginal.next();
                     //send it to the client
-                    System.out.println("Done");
+                    if (rs != null) {
+                        System.out.println("Done");
+                    } else {
+                        break;
+                    }
                 }
 
             }
@@ -175,7 +180,7 @@ public class Test {
         } catch (Exception ex) {
             Logger.getLogger(Test.class.getName()).log(Level.SEVERE, null, ex);
         }
-        return "";
+        return generalizedQuery;
     }
 
     private void readingThroughWhereTree(int hash, int utility, int privacy) {
@@ -199,7 +204,6 @@ public class Test {
         String[] infixList = whereConditions.split("\\s\\s\\s");
         for (int i = 0; i < infixList.length; i++) {
             if (!continueToNextOperand) {
-                // generalizedQuery += infixList[i] + " ";
                 break;
             } else {
                 c = infixList[i];
@@ -234,7 +238,7 @@ public class Test {
 
     }
 
-    private String generalizeValueAndCheckPrivacy(String condition, String nextOperator, int hash, int utility, int privacy) {
+    private String generalizeValueAndCheckPrivacy(String condition, int hash, int utility, int privacy) {
 
         String generalizedValues = "";
         try {
@@ -401,7 +405,7 @@ public class Test {
             ResultSet rs = (ResultSet) resultWithoutGroupBy.next();
             cacheResult(rs, originalQueryWithoutGroupBy_hash, false);
         }
-        if (checkTableExists("tbl_"+originalQueryWithoutGroupBy_hash)) {
+        if (checkTableExists("tbl_" + originalQueryWithoutGroupBy_hash)) {
             // execute all of the original query on the previous result and send it back to the user
             String newOriginalQuery = "select " + getSelectList(attributes) + " from tbl_" + originalQueryWithoutGroupBy_hash + " where " + whereClause.getCondition().toString() + " " + groupBy;
             QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newOriginalQuery);
@@ -513,7 +517,6 @@ public class Test {
                 }
                 Statement st = localCon.createStatement();
                 st.executeUpdate(insertData);
-                
 
             }
 
@@ -606,7 +609,7 @@ public class Test {
     }
 
     private boolean isLowerPrecedence(String operator, String operand, int hash, int utility, int privacy) {
-        String generalizedvalue = generalizeValueAndCheckPrivacy(operand, operator, hash, utility, privacy);
+        String generalizedvalue = generalizeValueAndCheckPrivacy(operand, hash, utility, privacy);
         switch (operator.toLowerCase()) {
             case "and":
                 if (generalizedvalue.equals("")) {
@@ -630,7 +633,7 @@ public class Test {
 
             default:
                 //last value with no next operator
-                generalizedQuery += generalizeValueAndCheckPrivacy(operand, "", hash, utility, privacy);
+                generalizedQuery += generalizedvalue;
                 return false;
         }
     }
@@ -687,7 +690,10 @@ public class Test {
 
     public static void main(String[] args) {
         Test x = new Test();
-        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='americanflag'", 1000, 5);
+        long s=System.currentTimeMillis();
+        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='www.prescriptionfortime.com' or anonId<1000", 1000, 5);
+        long f =System.currentTimeMillis();
+          System.out.println("Total Time: "+(f-s)+" ms");
     }
 
 }

@@ -165,7 +165,6 @@ public class Test {
                 System.out.println("Executing final query :" + newQuery);
                 QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newQuery);
                 while (resultOriginal.hasNext()) {
-
                     ResultSet rs = (ResultSet) resultOriginal.next();
                     //send it to the client
                     if (rs != null) {
@@ -198,7 +197,6 @@ public class Test {
                 } else {
                     whereConditions = whereConditions.replace(m.group(i), "   or   ");
                 }
-
             }
         }
         String[] infixList = whereConditions.split("\\s\\s\\s");
@@ -691,7 +689,7 @@ public class Test {
     public static void main(String[] args) {
         Test x = new Test();
         long s=System.currentTimeMillis();
-        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='www.prescriptionfortime.com' or anonId<1000", 1000, 5);
+        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='www.prescriptionfortime.com'", 1000, 5);
         long f =System.currentTimeMillis();
           System.out.println("Total Time: "+(f-s)+" ms");
     }

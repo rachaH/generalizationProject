@@ -65,12 +65,14 @@ public class Test {
     private MySQLWrapper mySqlWrapperServer;
     private MySQLWrapper mySqlWrapperLocal;
     private TWhereClause whereClause;
+    public String whereConditions;
     private TGroupBy groupBy;
     private ArrayList<String> attributes;
     private ArrayList<String> tables;
     private String originalQuery;
     private Connection serverCon = null;
     private Connection localCon = null;
+    private int nbTuples = 0;
 
     public Test() {
         try {
@@ -93,7 +95,7 @@ public class Test {
             this.attributes = SqlQueryParser.getAttributes(query);
             this.tables = SqlQueryParser.getTables(query);
             this.groupBy = SqlQueryParser.getGroupBy(query);
-            String whereConditions = whereClause.getCondition().toString();
+            whereConditions = whereClause.getCondition().toString();
 
             long start = System.currentTimeMillis();
             String pre_query = buildPreQuery(query);
@@ -102,6 +104,7 @@ public class Test {
 
             //Remove join conditions from the where clause to generalize the values without join conditions
             if (!joinWhereConditions.equals("")) {
+                String whereConditions = this.whereConditions;
                 Pattern p = Pattern.compile("(and |or )+" + joinWhereConditions + "( )?");
                 Matcher m = p.matcher(whereConditions);
 
@@ -142,38 +145,8 @@ public class Test {
             if (groupBy != null) {
                 groupByProcess();
             } else {
-                System.out.println("Generalization query : " + generalizedQuery);
-                //send the generalized query to the server
-                int generalizedQuery_hash = Math.abs(generalizedQuery.hashCode());
-                if (!checkTableExists("tbl_" + generalizedQuery_hash)) {
-                    QueryResult result = mySqlWrapperServer.executeQuery(generalizedQuery);
-                    while (result.hasNext()) {
-                        ResultSet rs = (ResultSet) result.next();
-                        if (rs != null) {
-                            start = System.currentTimeMillis();
-                            cacheResult(rs, generalizedQuery_hash, false);
-                            fin = System.currentTimeMillis();
-                            System.out.println("Caching Time of the generalization result : " + (fin - start) + " ms");
-                        } else {
-                            break;
-                        }
-                    }
-                }
-                //execute the original query on the generalized result
-                String selectList = getSelectList(attributes);
-                String newQuery = "select " + selectList + " from tbl_" + generalizedQuery_hash + " where " + whereConditions;
-                System.out.println("Executing final query :" + newQuery);
-                QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newQuery);
-                while (resultOriginal.hasNext()) {
-                    ResultSet rs = (ResultSet) resultOriginal.next();
-                    //send it to the client
-                    if (rs != null) {
-                        System.out.println("Done");
-                    } else {
-                        break;
-                    }
-                }
-
+                //  sendGeneralizedQuery();
+                //System.out.println("Generalization query : " + generalizedQuery);
             }
 
         } catch (Exception ex) {
@@ -182,23 +155,44 @@ public class Test {
         return generalizedQuery;
     }
 
-    private void readingThroughWhereTree(int hash, int utility, int privacy) {
-        generalizedQuery = "where ";
-        String whereConditions = whereClause.getCondition().toString();
-        Stack<String> stack = new Stack<String>();
-        StringBuffer postfix = new StringBuffer(whereConditions.length());
-        String c;
-        Pattern p = Pattern.compile("( and | or )+");
-        Matcher m = p.matcher(whereConditions.toLowerCase());
-        for (int i = 0; i <= m.groupCount(); i++) {
-            if (m.find()) {
-                if (m.group(i).contains("and")) {
-                    whereConditions = whereConditions.replace(m.group(i), "   and   ");
+    private void sendGeneralizedQuery() {
+        //send the generalized query to the server
+        int generalizedQuery_hash = Math.abs(generalizedQuery.hashCode());
+        if (!checkTableExists("tbl_" + generalizedQuery_hash)) {
+            QueryResult result = mySqlWrapperServer.executeQuery(generalizedQuery);
+            while (result.hasNext()) {
+                ResultSet rs = (ResultSet) result.next();
+                if (rs != null) {
+                    long start = System.currentTimeMillis();
+                    cacheResult(rs, generalizedQuery_hash, false);
+                    long fin = System.currentTimeMillis();
+                    System.out.println("Caching Time of the generalization result : " + (fin - start) + " ms");
                 } else {
-                    whereConditions = whereConditions.replace(m.group(i), "   or   ");
+                    break;
                 }
             }
         }
+        //execute the original query on the generalized result
+        String selectList = getSelectList(attributes);
+        String newQuery = "select " + selectList + " from tbl_" + generalizedQuery_hash + " where " + this.whereConditions;
+        System.out.println("Executing final query :" + newQuery);
+        QueryResult resultOriginal = mySqlWrapperLocal.executeQuery(newQuery);
+        while (resultOriginal.hasNext()) {
+            ResultSet rs = (ResultSet) resultOriginal.next();
+            //send it to the client
+            if (rs == null) {
+                break;
+            }
+        }
+    }
+
+    private void readingThroughWhereTree(int hash, int utility, int privacy) {
+        generalizedQuery = "where ";
+        Stack<String> stack = new Stack<String>();
+        StringBuffer postfix = new StringBuffer(whereConditions.length());
+        String c;
+        whereConditions = whereConditions.replace(") and (", "   and   ");
+        whereConditions = whereConditions.replace(") or (", "   or   ");
         String[] infixList = whereConditions.split("\\s\\s\\s");
         for (int i = 0; i < infixList.length; i++) {
             if (!continueToNextOperand) {
@@ -236,7 +230,7 @@ public class Test {
 
     }
 
-    private String generalizeValueAndCheckPrivacy(String condition, int hash, int utility, int privacy) {
+    private String generalizeValueAndCheckPrivacy(String condition, String nextOperator, int hash, int utility, int privacy) {
 
         String generalizedValues = "";
         try {
@@ -246,26 +240,23 @@ public class Test {
 
             boolean satisfait = false;
             int offset = 0;
+            //int k = privacy;
             int nbOfTuples = 0;
+            
             if (!isInteger(valueRequested)) {
+                
                 String commonString = null;
-
+                QueryResult result = mySqlWrapperLocal.executeQuery("select count(*) from tbl_" + hash);
+                ResultSet resCount = (ResultSet) result.next();
+                int count = resCount.getInt(1);
+                
                 while (!satisfait) {
+                    if (offset > count) {
+                        generalizedValues = attribute + " LIKE '%'";
+                        break;
+                    }
                     ArrayList<String> values = new ArrayList<>();
                     values.add(valueRequested.substring(1, valueRequested.length() - 1));
-//                    QueryResult resultCount = mySqlWrapperLocal.executeQuery("select count(*) from tbl_" + hash);
-//                    int count = 0;
-//                    while (resultCount.hasNext()) {
-//                        ResultSet rs = (ResultSet) resultCount.next();
-//                        while (rs.next()) {
-//                            count = rs.getInt(1);
-//                        }
-//                    }
-//
-//                    if (offset >= count) {
-//                        generalizedValues = "";
-//                        break;
-//                    }
                     Statement st = localCon.createStatement();
                     ResultSet res = st.executeQuery("select " + attribute + " from tbl_" + hash + " ORDER BY rowCount limit " + privacy + " Offset " + offset);
                     while (res.next()) {
@@ -277,37 +268,33 @@ public class Test {
                     if (values.size() >= privacy) {
                         commonString = this.identifyCommonSubStrOfNStr(values);
                         if (commonString != "") {
-                            Statement stp = localCon.createStatement();
-                            ResultSet rs = stp.executeQuery("select sum(rowCount) from TBL_" + hash + " where " + attribute + " LIKE '%" + commonString + "%'");
-                            while (rs.next()) {
-                                nbOfTuples = rs.getInt(1);
+                            if (commonString.contains("'")) {
+                                commonString = commonString.replace("'", "''"); //for avoiding sql syntax error
                             }
+                            QueryResult resultUtility = mySqlWrapperLocal.executeQuery("select sum(rowCount) from TBL_" + hash + " where " + attribute + " LIKE \"%" + commonString + "%\"");
+                            ResultSet rs = (ResultSet) resultUtility.next();
+                            nbOfTuples = rs.getInt(1);
 
-//                            QueryResult resultUtility = mySqlWrapperLocal.executeQuery("select sum(rowCount) from TBL_" + hash + " where " + attribute + " LIKE '%" + commonString + "%'");
-//                            while (resultUtility.hasNext()) {
-//                                ResultSet rs = (ResultSet) resultUtility.next();
-//                                while (rs.next()) {
-//                                    nbOfTuples = rs.getInt(1);
-//                                }
+//                            if (nextOperator.equalsIgnoreCase("or") || nextOperator.equals("")) {
+//                                nbOfTuples += nbTuples;
 //                            }
                             if (nbOfTuples <= utility) {
+//                                if (nextOperator.equalsIgnoreCase("or")) {
+//                                    nbTuples = nbOfTuples;
+//                                }
                                 satisfait = true;
                                 generalizedValues += attribute + " LIKE '%" + commonString + "%'";
                                 break;
                             }
                         }
                     }
-                    offset += privacy;
-                }
-                if (generalizedValues.equals("")) {
-                    return "";
+                    offset = offset + privacy;
                 }
             } else if (condition.contains("<=") || condition.contains("<") || condition.contains("=")) {
                 int alpha = 5;
                 while (!satisfait) {
                     nbOfTuples = 0;
                     int value = Integer.parseInt(valueRequested) + alpha;
-
                     QueryResult result = mySqlWrapperLocal.executeQuery("select TBL_" + hash + ".rowcount from TBL_" + hash + " where " + attribute + " < " + value);
                     int diverseRows = 0;
                     while (result.hasNext()) {
@@ -321,7 +308,6 @@ public class Test {
                             break;
                         }
                     }
-
                     if (nbOfTuples <= utility && diverseRows >= privacy) {
                         satisfait = true;
                         generalizedValues += attribute + " < " + value;
@@ -349,13 +335,6 @@ public class Test {
                                 break;
                             }
                         }
-//                        QueryResult resultUtility = mySqlWrapperLocal.executeQuery("select sum(rowcount) from TBL_" + hash + " where " + attribute + " > " + value);
-//                        while (result.hasNext()) {
-//                            ResultSet rs = (ResultSet) result.next();
-//                            while (rs.next()) {
-//                                nbOfTuples = rs.getInt(1);
-//                            }
-//                        }
                         if (nbOfTuples <= utility && diverseRows >= privacy) {
                             satisfait = true;
                             generalizedValues += attribute + " > " + value;
@@ -414,12 +393,15 @@ public class Test {
     }
 
     public String buildPreQuery(String query) {
-        String[] conditions = whereClause.getCondition().toString().toLowerCase().split(" or | and ");
+        whereConditions = whereClause.getCondition().toString().toLowerCase().substring(1, whereClause.getCondition().toString().length() - 1);
+        String[] conditions = whereConditions.split("([)] and [(]|[)] or [(])");
         //String limit = query.substring(query.indexOf(" limit"), query.length());
         ArrayList<String> whereAttributes = new ArrayList<String>();
         for (String condition : conditions) {
             String[] c = condition.split("<=|>=|<|=|>");
-            whereAttributes.add(c[0]);
+            if (!whereAttributes.contains(c[0])) {
+                whereAttributes.add(c[0]);
+            }
         }
         String pre_query = "SELECT ";
         String groupBy = " GROUP By ";
@@ -459,30 +441,30 @@ public class Test {
 
     private void cacheResult(ResultSet rs, int hashcode, boolean prequeryCashing) {
         try {
-            StringBuilder sbCreateTable = new StringBuilder(1024);
-
             ResultSetMetaData rsmd = rs.getMetaData();
             int columnCount = rsmd.getColumnCount();
 
-            sbCreateTable.append("CREATE table TBL_" + hashcode + " ( ");
+            if (!checkTableExists("tbl_" + hashcode)) {
+                StringBuilder sbCreateTable = new StringBuilder(1024);
+                sbCreateTable.append("CREATE table TBL_" + hashcode + " ( ");
 
-            for (int i = 1; i <= columnCount; i++) {
-                if (i > 1) {
-                    sbCreateTable.append(", ");
+                for (int i = 1; i <= columnCount; i++) {
+                    if (i > 1) {
+                        sbCreateTable.append(", ");
+                    }
+                    String columnName = rsmd.getColumnLabel(i);
+                    String columnType = rsmd.getColumnTypeName(i);
+
+                    sbCreateTable.append(columnName).append(" ").append(columnType);
+
+                    int precision = rsmd.getPrecision(i);
+                    if (precision != 0) {
+                        sbCreateTable.append("( ").append(precision).append(" )");
+                    }
                 }
-                String columnName = rsmd.getColumnLabel(i);
-                String columnType = rsmd.getColumnTypeName(i);
-
-                sbCreateTable.append(columnName).append(" ").append(columnType);
-
-                int precision = rsmd.getPrecision(i);
-                if (precision != 0) {
-                    sbCreateTable.append("( ").append(precision).append(" )");
-                }
+                sbCreateTable.append(" ) ");
+                mySqlWrapperLocal.execute(sbCreateTable.toString());
             }
-            sbCreateTable.append(" ) ");
-            mySqlWrapperLocal.execute(sbCreateTable.toString());
-
             while (rs.next()) {
                 String insertData = "INSERT INTO TBL_" + hashcode + " (";
 
@@ -607,30 +589,19 @@ public class Test {
     }
 
     private boolean isLowerPrecedence(String operator, String operand, int hash, int utility, int privacy) {
-        String generalizedvalue = generalizeValueAndCheckPrivacy(operand, hash, utility, privacy);
+        String generalizedvalue = generalizeValueAndCheckPrivacy(operand, operator, hash, utility, privacy);
         switch (operator.toLowerCase()) {
             case "and":
-                if (generalizedvalue.equals("")) {
-                    generalizedQuery += operand + " " + operator + " ";
-                    continueToNextOperand = true;
-                } else {
-                    generalizedQuery += generalizedvalue;
-                    continueToNextOperand = false;
-                }
+                generalizedQuery += generalizedvalue;
+                continueToNextOperand = false;
                 return (operand == "AND");
 
             case "or":
-                if (generalizedvalue.equals("")) {
-                    generalizedQuery += operand + operator;
-                    continueToNextOperand = true;
-                } else {
-                    generalizedQuery += generalizedvalue + " or ";
-                    continueToNextOperand = true;
-                }
+                generalizedQuery += generalizedvalue + " or ";
+                continueToNextOperand = true;
                 return (operand == "OR");
 
             default:
-                //last value with no next operator
                 generalizedQuery += generalizedvalue;
                 return false;
         }
@@ -686,12 +657,12 @@ public class Test {
         return query;
     }
 
-    public static void main(String[] args) {
-        Test x = new Test();
-        long s=System.currentTimeMillis();
-        x.generalizeQuery("SELECT * FROM aoldata WHERE Query='www.prescriptionfortime.com'", 1000, 5);
-        long f =System.currentTimeMillis();
-          System.out.println("Total Time: "+(f-s)+" ms");
-    }
+//    public static void main(String[] args) {
+//        Test x = new Test();
+//        long s = System.currentTimeMillis();
+//        x.generalizeQuery("SELECT * FROM aoldata WHERE (Query='rentdirect.com') OR (Query='www.newyorklawyersite.com') OR (Query='merit release appearance') OR (Query='rapny.com') OR (Query='vaniqa.comh') OR (Query='merit release appearance') OR (Query='attornyleslie.com') OR (Query='broadway.vera.org') OR (Query='united.com') OR (Query='vera.org') OR (Query='whitepages.com') OR (Query='staple.com') OR (Query='rapny.com') OR (Query='broadway.vera.org') OR (Query='merit release appearance') OR (Query='www.newyorklawyersite.com') OR (Query='space.comhttp') OR (Query='www.newyorklawyersite.com') OR (Query='lottery') OR (Query='ucs.ljx.com') OR (Query='attornyleslie.com') OR (Query='vaniqa.comh')", 1400, 10);
+//        long f = System.currentTimeMillis();
+//        System.out.println("Total Time: " + (f - s) + " ms");
+    //}
 
 }
